@@ -1,7 +1,6 @@
 # Core dependencies
 httpx>=0.25.0
 python-dotenv>=1.0.0
-asyncio
 
 # MCP support
 mcp>=1.0.0
