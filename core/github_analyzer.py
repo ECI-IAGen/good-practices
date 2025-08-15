@@ -10,6 +10,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
 from .llm import LLMFactory, LLMProvider
+from jinja2 import Template
 
 
 class GitHubJavaAnalyzer:
@@ -36,6 +37,7 @@ class GitHubJavaAnalyzer:
         
         # Configuración de GitHub API
         self.github_token = os.getenv('GITHUB_PAT')
+        self.base_url = os.getenv('BASE_URL', 'http://localhost:8000')
         self.headers = self._setup_headers()
         
         # LLM para análisis
@@ -206,7 +208,7 @@ class GitHubJavaAnalyzer:
             print(f"❌ Error durante la descarga: {e}")
             return False
 
-    def run_checkstyle_analysis(self, xml_config_path: str, max_files: int = None) -> dict:
+    def run_checkstyle_analysis(self, xml_config_path: str, submission_id: int, max_files: int = None) -> dict:
         """
         Ejecuta análisis de Checkstyle en archivos locales
         
@@ -249,14 +251,15 @@ class GitHubJavaAnalyzer:
             },
             'patterns': {}
         }
-        
+
         start_time = time.time()
-        
+        # Collect raw Checkstyle output for detailed report
+        raw_output = ""
+
         for i, file_info in enumerate(files_to_analyze, 1):
             print(f"📄 Analizando archivo {i}/{len(files_to_analyze)}: {file_info['path']}")
-            
             local_file_path = Path(file_info['local_path'])
-            
+
             # Ejecutar Checkstyle
             result = subprocess.run([
                 "java", "-jar", str(jar_path),
@@ -264,26 +267,47 @@ class GitHubJavaAnalyzer:
                 "-f", "plain",
                 str(local_file_path)
             ], capture_output=True, text=True)
-            
+
             # Parsear resultados
             file_results = self._parse_checkstyle_output(result.stdout)
-            
+            # Acumular salida cruda para reporte
+            raw_output += result.stdout + "\n"
+
             # Agregar a totales
             results['summary']['total_errors'] += file_results['errors']
             results['summary']['total_warnings'] += file_results['warnings']
-            
+
             # Agregar patrones
             for pattern in file_results['violations']:
                 pattern_name = pattern['rule']
                 if pattern_name not in results['patterns']:
                     results['patterns'][pattern_name] = {'count': 0, 'type': pattern['type']}
                 results['patterns'][pattern_name]['count'] += 1
-        
+
+        # After analyzing all files, compute summary and save report
         results['summary']['analysis_time'] = time.time() - start_time
         results['timestamp'] = datetime.now().isoformat()
-        
+
+        # Guardar reporte detallado con la información de errores en un solo archivo
+        try:
+            # Crear directorio reports si no existe
+            reports_dir = self.base_dir / "reports"
+            reports_dir.mkdir(exist_ok=True)
+            
+            # Generar y guardar reporte HTML
+            html_report_file = reports_dir / f"{submission_id}_checkstyle_report.html"
+            html_content = self._generate_html_report(raw_output, submission_id)
+            with open(html_report_file, "w", encoding="utf-8") as html_rpt:
+                html_rpt.write(html_content)
+            print(f"📋 Reporte HTML guardado en {html_report_file}")
+            
+            # Agregar información del reporte a los resultados
+            results['html_url'] = f"{self.base_url}/report/{submission_id}"
+            
+        except Exception as e:
+            print(f"⚠️ No se pudo guardar el reporte de Checkstyle: {e}")
+
         print(f"✅ Análisis Checkstyle completado: {results['summary']['total_errors']} errores, {results['summary']['total_warnings']} warnings")
-        
         return results
 
     def _parse_checkstyle_output(self, output: str) -> dict:
@@ -600,3 +624,88 @@ class GitHubJavaAnalyzer:
             'total_warning_occurrences': sum(p['frequency'] for p in warning_patterns.values()),
             'quality_level': quality_level
         }
+
+    def _generate_html_report(self, checkstyle_output: str, submission_id: str) -> str:
+        """
+        Genera un reporte HTML amigable agrupando por regla, con listas expandibles
+        de ocurrencias mostrando archivo, línea y mensaje.
+        
+        Args:
+            checkstyle_output: Salida cruda de Checkstyle
+            submission_id: ID de la submission para el título
+            
+        Returns:
+            str: Contenido HTML del reporte
+        """
+        # Cargar template
+        template_path = self.base_dir / "templates" / "report_template.html"
+        with open(template_path, "r", encoding="utf-8") as f:
+            template_content = f.read()
+        template = Template(template_content)
+
+        # Parsear líneas crudas en estructura agrupada por severidad y regla
+        import re
+        from pathlib import Path as _P
+
+        # Regex para líneas del estilo:
+        # [ERROR] C:\path\File.java:143:31: mensaje [MagicNumber]
+        line_re = re.compile(r"\[(ERROR|WARN|WARNING)\]\s+(.+?):(\d+):(\d+):\s+(.*?)\s+\[([^\]]+)\]")
+
+        groups = { 'ERROR': {}, 'WARNING': {} }
+        total_errors = 0
+        total_warnings = 0
+
+        for raw in checkstyle_output.splitlines():
+            m = line_re.search(raw)
+            if not m:
+                continue
+            sev, file_path, line_no, col_no, message, rule = m.groups()
+            sev = 'ERROR' if sev == 'ERROR' else 'WARNING'  # normalizar WARN/WARNING
+            try:
+                line_no = int(line_no)
+                col_no = int(col_no)
+            except Exception:
+                pass
+
+            file_name = _P(file_path).name
+            occ = {
+                'file': file_path,
+                'file_name': file_name,
+                'line': line_no,
+                'column': col_no,
+                'message': message,
+                'rule': rule,
+                'raw': raw,
+            }
+
+            if rule not in groups[sev]:
+                groups[sev][rule] = { 'count': 0, 'occurrences': [] }
+            groups[sev][rule]['count'] += 1
+            groups[sev][rule]['occurrences'].append(occ)
+
+            if sev == 'ERROR':
+                total_errors += 1
+            else:
+                total_warnings += 1
+
+        # Convertir a listas ordenadas por frecuencia desc
+        def to_group_list(d):
+            items = []
+            for rule, info in d.items():
+                # Ordenar ocurrencias por archivo y línea
+                info['occurrences'].sort(key=lambda x: (x['file'], x['line'], x['column']))
+                items.append({ 'rule': rule, 'count': info['count'], 'occurrences': info['occurrences'] })
+            items.sort(key=lambda x: x['count'], reverse=True)
+            return items
+
+        groups_error = to_group_list(groups['ERROR'])
+        groups_warning = to_group_list(groups['WARNING'])
+
+        # Renderizar
+        return template.render(
+            submission_id=submission_id,
+            total_errors=total_errors,
+            total_warnings=total_warnings,
+            groups_error=groups_error,
+            groups_warning=groups_warning,
+        )

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, field_validator
 from typing import Dict, Any, Union, Optional, List
 from datetime import datetime
@@ -64,46 +65,6 @@ class SubmissionDTO(BaseModel):
             return v
         else:
             raise ValueError(f"Formato de fecha no soportado: {v}")
-
-class CheckstyleSubmissionDTO(SubmissionDTO):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "id": 1,
-                "assignmentId": 123,
-                "assignmentTitle": "Proyecto Gomoku",
-                "teamId": 456,
-                "teamName": "TeamAlpha",
-                "submittedAt": "2025-08-02T10:30:00",
-                "fileUrl": "https://github.com/owner/repository",
-                "classId": 789,
-                "className": "Programación Orientada a Objetos"
-            }
-        }
-    )
-    
-    # Los campos xml_config_path y max_files ahora son internos
-    pass
-
-class LLMSubmissionDTO(SubmissionDTO):
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "id": 1,
-                "assignmentId": 123,
-                "assignmentTitle": "Proyecto Gomoku",
-                "teamId": 456,
-                "teamName": "TeamAlpha",
-                "submittedAt": "2025-08-02T10:30:00",
-                "fileUrl": "https://github.com/owner/repository",
-                "classId": 789,
-                "className": "Programación Orientada a Objetos"
-            }
-        }
-    )
-    
-    # El campo max_files ahora es interno
-    pass
 
 class EvaluationDTO(BaseModel):
     model_config = ConfigDict(
@@ -285,7 +246,7 @@ async def clean_downloads() -> Dict[str, Any]:
         )
 
 @app.post("/checkstyle-analysis")
-async def checkstyle_analysis(request: CheckstyleSubmissionDTO) -> EvaluationDTO:
+async def checkstyle_analysis(request: SubmissionDTO) -> EvaluationDTO:
     """
     Endpoint para análisis con Checkstyle
     
@@ -313,6 +274,7 @@ async def checkstyle_analysis(request: CheckstyleSubmissionDTO) -> EvaluationDTO
         # Ejecutar análisis Checkstyle
         results = analyzer.run_checkstyle_analysis(
             xml_config_path="analysis/tools/sun_checks.xml",  # Valor fijo
+            submission_id=request.id,  # Usar ID de la entrega
             max_files=100  # Valor fijo
         )
         
@@ -351,7 +313,7 @@ async def checkstyle_analysis(request: CheckstyleSubmissionDTO) -> EvaluationDTO
         )
 
 @app.post("/llm-analysis")
-async def llm_analysis(request: LLMSubmissionDTO) -> EvaluationDTO:
+async def llm_analysis(request: SubmissionDTO) -> EvaluationDTO:
     """
     Endpoint para análisis con LLM
     
@@ -413,6 +375,67 @@ async def llm_analysis(request: LLMSubmissionDTO) -> EvaluationDTO:
             detail=f"Error interno del servidor: {str(e)}"
         )
 
+@app.get("/report/{submission_id}", response_class=HTMLResponse)
+async def get_html_report(submission_id: str):
+    """
+    Endpoint para servir reportes HTML de Checkstyle por submission_id
+    """
+    try:
+        # Construir ruta del archivo HTML
+        report_path = Path("analysis/reports") / f"{submission_id}_checkstyle_report.html"
+        
+        # Verificar que el archivo existe
+        if not report_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Report not found for submission {submission_id}"
+            )
+        
+        # Leer y retornar el contenido HTML
+        with open(report_path, 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        
+        return HTMLResponse(content=html_content, status_code=200)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error serving report: {str(e)}"
+        )
+
+@app.get("/report/{submission_id}/download")
+async def download_txt_report(submission_id: str):
+    """
+    Endpoint para descargar reportes TXT de Checkstyle por submission_id
+    """
+    try:
+        # Construir ruta del archivo TXT
+        report_path = Path("analysis/reports") / f"{submission_id}_checkstyle_report.txt"
+        
+        # Verificar que el archivo existe
+        if not report_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"TXT report not found for submission {submission_id}"
+            )
+        
+        # Servir el archivo TXT como descarga
+        return FileResponse(
+            path=report_path,
+            media_type='text/plain',
+            filename=f"checkstyle_report_{submission_id}.txt"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error serving TXT report: {str(e)}"
+        )
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="localhost", port=8000)

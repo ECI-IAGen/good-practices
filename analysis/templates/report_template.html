@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Checkstyle Report</title>
+    <style>
+        body {
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f2f2f2;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            border-radius: 8px;
+        }
+
+        h1,
+        h2 {
+            color: #333;
+            margin: 0 0 10px 0;
+        }
+
+        .summary {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .badge {
+            padding: 6px 10px;
+            border-radius: 16px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .badge.error {
+            background: #fdecea;
+            color: #a94442;
+        }
+
+        .badge.warning {
+            background: #fff6e5;
+            color: #8a6d3b;
+        }
+
+        details {
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            margin: 10px 0;
+            background: #fafafa;
+        }
+
+        summary {
+            cursor: pointer;
+            padding: 10px 14px;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            list-style: none;
+        }
+
+        summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .rule-title {
+            font-weight: 600;
+            color: #111827;
+        }
+
+        .count-pill {
+            background: #e5e7eb;
+            padding: 4px 10px;
+            border-radius: 16px;
+            font-size: 12px;
+            color: #374151;
+        }
+
+        .occ-list {
+            padding: 0 14px 12px 14px;
+        }
+
+        .occ {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 8px 12px;
+            padding: 10px 0;
+            border-bottom: 1px dashed #e5e7eb;
+            font-size: 14px;
+            word-break: break-word;
+        }
+
+        .occ:last-child {
+            border-bottom: none;
+        }
+
+        .occ .loc {
+            color: #6b7280;
+        }
+
+        .occ .msg {
+            color: #374151;
+        }
+
+        .occ .file {
+            color: #2563eb;
+            text-decoration: none;
+        }
+
+        .occ .file:hover {
+            text-decoration: underline;
+        }
+
+        .section-title {
+            margin-top: 24px;
+        }
+
+        .empty {
+            color: #6b7280;
+            font-style: italic;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Checkstyle Report</h1>
+        <div class="summary">
+            <span class="badge error">Errors: {{ total_errors }}</span>
+            <span class="badge warning">Warnings: {{ total_warnings }}</span>
+        </div>
+
+        <h2 class="section-title">Errors</h2>
+        {% if groups_error %}
+        {% for group in groups_error %}
+        <details>
+            <summary>
+                <span class="rule-title">{{ group.rule }}</span>
+                <span class="count-pill">{{ group.count }} occurrences</span>
+            </summary>
+            <div class="occ-list">
+                {% for occ in group.occurrences %}
+                <div class="occ">
+                    <div class="loc">Line {{ occ.line }}:{{ occ.column }}</div>
+                    <div class="msg"><strong class="error">[ERROR]</strong> {{ occ.message }}</div>
+                    <div class="loc">File</div>
+                    <div><a class="file" href="file:///{{ occ.file }}" target="_blank">{{ occ.file }}</a></div>
+                </div>
+                {% endfor %}
+            </div>
+        </details>
+        {% endfor %}
+        {% else %}
+        <p class="empty">No errors found.</p>
+        {% endif %}
+
+        <h2 class="section-title">Warnings</h2>
+        {% if groups_warning %}
+        {% for group in groups_warning %}
+        <details>
+            <summary>
+                <span class="rule-title">{{ group.rule }}</span>
+                <span class="count-pill">{{ group.count }} occurrences</span>
+            </summary>
+            <div class="occ-list">
+                {% for occ in group.occurrences %}
+                <div class="occ">
+                    <div class="loc">Line {{ occ.line }}:{{ occ.column }}</div>
+                    <div class="msg"><strong class="warning">[WARNING]</strong> {{ occ.message }}</div>
+                    <div class="loc">File</div>
+                    <div><a class="file" href="file:///{{ occ.file }}" target="_blank">{{ occ.file }}</a></div>
+                </div>
+                {% endfor %}
+            </div>
+        </details>
+        {% endfor %}
+        {% else %}
+        <p class="empty">No warnings found.</p>
+        {% endif %}
+    </div>
+</body>
+
+</html>
